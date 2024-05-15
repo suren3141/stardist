@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib
 matplotlib.rcParams["image.interpolation"] = 'none'
 import matplotlib.pyplot as plt
-from glob import glob
 from tqdm import tqdm
 from csbdeep.utils import Path, normalize
 
@@ -14,18 +13,59 @@ from stardist.models import Config2D, StarDist2D, StarDistData2D
 
 import cv2
 
-import sys, os
-sys.path.append('/workspace/hover_net')
+# sys.path.append('/workspace/hover_net')
+
+import glob, os, sys
 sys.path.append('/workspace/stardist')
 
-from dataloader.utils import get_file_list
-from dataloader.train_loader import MoNuSegDataset
 
-from torch.utils.data import DataLoader
+
+def get_file_list(data_dir_list, file_type, img_path="images", ann_path='bin_masks', inst_path=None):
+    """
+    """
+
+    if isinstance(data_dir_list, str): data_dir_list = [data_dir_list]
+
+    file_list = []
+
+    if file_type == '.png':
+        for dir_path in data_dir_list:
+            image_files =  sorted(glob.glob(os.path.join(dir_path, img_path, '*.png')))
+            ann_files =  sorted(glob.glob(os.path.join(dir_path, ann_path, '*.png')))
+            if inst_path is not None:
+                inst_files =  sorted(glob.glob(os.path.join(dir_path, inst_path, '*.tif')))
+                files = list(zip(image_files, ann_files, inst_files))
+            else:
+                inst_files = None
+                files = list(zip(image_files, ann_files))
+
+
+            file_list.extend(files)
+            # file_list.extend(image_files)
+
+        file_list = sorted(file_list, key=lambda x:x[0])       
+        # file_list.sort()  # to always ensure same input ordering
+    
+    else:
+        raise NotImplementedError()
+    
+    # Make sure all file names are the same
+    for f in file_list:
+        x = [Path(i).stem for i in f]
+        assert len(set(x)) == 1 and x[0] != ''
+
+    return file_list
+
+
+# from dataloader.utils import get_file_list
+# from dataloader.train_loader import MoNuSegDataset
+
+# from torch.utils.data import DataLoader
 
 np.random.seed(42)
 lbl_cmap = random_label_cmap()
 
+from stardist.matching import matching
 
 from PIL import Image
 def read_img(filename, mode='RGB'):
@@ -85,6 +125,10 @@ def augmenter(x, y):
 
 
 def sem_to_inst_map(sem_map):
+    """
+    Convert semantic segmentation map to instance segmentaion map.
+    Not accurate, but works ok
+    """
     num_labels, labels = cv2.connectedComponents(sem_map)
 
     inst_map = np.zeros_like(sem_map)
@@ -102,7 +146,7 @@ def get_file_label(gt_dirs, gt=True):
 
     for k, v in gt_dirs.items():
         if gt:
-            f = get_file_list(v, ".png")
+            f = get_file_list(v, ".png", inst_path='inst_masks')
         else:
             f = get_file_list(v, ".png", img_path="samples", ann_path="labels")
         file_list.extend(f)
@@ -112,13 +156,22 @@ def get_file_label(gt_dirs, gt=True):
 
 if __name__ == "__main__":
 
+    subsample = None
+
     gt_dirs = {
         # "all": ["/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData"],
-        "train": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTrainingData"],
+        # "train": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTrainingData"],
+        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTrainingData"],
         # "test": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTestData"],
+        # "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
     }
 
     gt_file_list, _ = get_file_label(gt_dirs, gt=True)
+
+    if subsample is not None:
+        np.random.seed(42)
+        ind = np.random.choice(len(gt_file_list), int(len(gt_file_list)*float(subsample)), replace=False)
+        gt_file_list = [gt_file_list[i] for i in ind]
 
     print(f"gt_file -> {len(gt_file_list)}")
 
@@ -131,7 +184,7 @@ if __name__ == "__main__":
 
 
     syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
-    syn_dirs = sorted(glob(os.path.join(syn_pardir, "*")))
+    syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, "*")))
 
     def get_syn_name(x):
         c, x = os.path.split(x)
@@ -141,7 +194,7 @@ if __name__ == "__main__":
     syn_dirs = { get_syn_name(x): x for x in syn_dirs}
 
     syn_file_list, _ = get_file_label(syn_dirs, gt=False)
-    # syn_file_list = []
+    syn_file_list = []
 
     print(f"syn_file -> {len(syn_file_list)}")
 
@@ -241,7 +294,7 @@ if __name__ == "__main__":
         # alternatively, try this:
         # limit_gpu_memory(None, allow_growth=True)
 
-    model = StarDist2D(conf, name='stardist_gt_syn', basedir='models_monuseg_4')
+    model = StarDist2D(conf, name='stardist_gt', basedir='/mnt/dataset/stardist/models_monuseg')
 
     '''
     median_size = calculate_extents(list(Y), np.median)
@@ -255,5 +308,22 @@ if __name__ == "__main__":
         
     '''
 
-    model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter)
+    model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=2000)
 
+
+    test_dirs = {
+        "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
+    }
+
+    test_file_list, _ = get_file_label(test_dirs, gt=True)
+
+    X_test = list(map(lambda x: img_preprocess(read_img(x[0], 'RGB')), test_file_list))
+    Y_test = list(map(lambda x: label_preprocess(read_img(x[1], 'L')), test_file_list))
+
+    Y_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
+              for x in tqdm(X_test)]
+
+    taus = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    stats = [matching_dataset(Y_test, Y_pred, thresh=t, show_progress=False) for t in tqdm(taus)]
+
+    print(stats[taus.index(0.5)])
