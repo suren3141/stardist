@@ -20,7 +20,7 @@ sys.path.append('/workspace/stardist')
 
 
 
-def get_file_list(data_dir_list, file_type, img_path="images", ann_path='bin_masks', inst_path=None):
+def get_file_list(data_dir_list, file_type, img_path="images", ann_path='bin_masks', inst_path=None, filt=None):
     """
     """
 
@@ -30,15 +30,21 @@ def get_file_list(data_dir_list, file_type, img_path="images", ann_path='bin_mas
 
     if file_type == '.png':
         for dir_path in data_dir_list:
-            image_files =  sorted(glob.glob(os.path.join(dir_path, img_path, '*.png')))
-            ann_files =  sorted(glob.glob(os.path.join(dir_path, ann_path, '*.png')))
-            if inst_path is not None:
-                inst_files =  sorted(glob.glob(os.path.join(dir_path, inst_path, '*.tif')))
-                files = list(zip(image_files, ann_files, inst_files))
-            else:
-                inst_files = None
-                files = list(zip(image_files, ann_files))
+            ext = '*.png' if filt is None else f'{filt}.png'
+            image_files =  sorted(glob.glob(os.path.join(dir_path, img_path, ext)))
 
+            if ann_path is not None:
+                ann_files =  sorted(glob.glob(os.path.join(dir_path, ann_path, ext)))
+            else:
+                ann_files = [None] * len(image_files)
+
+            if inst_path is not None:
+                ext = '*.tif' if filt is None else f'{filt}.tif'
+                inst_files =  sorted(glob.glob(os.path.join(dir_path, inst_path, ext)))
+            else:
+                inst_files = [None] * len(image_files)
+
+            files = list(zip(image_files, ann_files, inst_files))
 
             file_list.extend(files)
             # file_list.extend(image_files)
@@ -51,7 +57,7 @@ def get_file_list(data_dir_list, file_type, img_path="images", ann_path='bin_mas
     
     # Make sure all file names are the same
     for f in file_list:
-        x = [Path(i).stem for i in f]
+        x = [Path(i).stem for i in f if i is not None]
         assert len(set(x)) == 1 and x[0] != ''
 
     return file_list
@@ -138,30 +144,40 @@ def sem_to_inst_map(sem_map):
 
     return inst_map
 
+def sem_to_inst_stardist(sem_map):
+    model_versatile = StarDist2D.from_pretrained('2D_versatile_fluo')
+    labels, details = model_versatile.predict_instances(sem_map)
+    return labels
 
-def get_file_label(gt_dirs, gt=True):
+def get_file_label(gt_dirs, gt=True, img_path=None, ann_path=None, inst_path=None, filt=None):
     file_list = []
     file_labels = []
 
 
     for k, v in gt_dirs.items():
-        if gt:
-            f = get_file_list(v, ".png", inst_path='inst_masks')
+        if img_path is not None:
+            f = get_file_list(v, ".png", img_path=img_path, ann_path=ann_path, inst_path=inst_path, filt=filt)
+        elif gt:
+            f = get_file_list(v, ".png", inst_path='inst_masks', filt=filt)
         else:
-            f = get_file_list(v, ".png", img_path="samples", ann_path="labels")
+            f = get_file_list(v, ".png", img_path="samples", ann_path="labels", filt=filt)
         file_list.extend(f)
         file_labels.extend([f"{k}"] * len(f))
     
     return file_list, file_labels
 
-if __name__ == "__main__":
-
+def main(out_name, filters):
     subsample = None
+    use_inst_mask = True
+
+    sem2inst = sem_to_inst_map
+
+    train_epochs = 1000
 
     gt_dirs = {
         # "all": ["/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData"],
         # "train": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTrainingData"],
-        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTrainingData"],
+        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/10ss/MoNuSegTrainingData"],
         # "test": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTestData"],
         # "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
     }
@@ -183,7 +199,8 @@ if __name__ == "__main__":
     gt_file_train = [gt_file_list[i] for i in ind_train]
 
 
-    syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
+    # syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
+    # syn_pardir = "/mnt/cvai_s3/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
     syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, "*")))
 
     def get_syn_name(x):
@@ -193,12 +210,24 @@ if __name__ == "__main__":
 
     syn_dirs = { get_syn_name(x): x for x in syn_dirs}
 
-    syn_file_list, _ = get_file_label(syn_dirs, gt=False)
+    syn_dirs = {
+        "syn" : syn_pardir
+    }
+
     syn_file_list = []
+    for f in filters:
+        s, _ = get_file_label(syn_dirs, img_path=None, inst_path=None, filt=f)
+        syn_file_list.extend(s)
 
-    print(f"syn_file -> {len(syn_file_list)}")
+    syn_file_list_filtered = []
 
-    train_file_list = gt_file_train + syn_file_list
+    for f in syn_file_list:
+        valid = any([Path(f[0]).stem.startswith(Path(i[0]).stem) for i in gt_file_list])
+        if valid : syn_file_list_filtered.append(f)
+
+    print(f"syn_file -> {len(syn_file_list_filtered)}")
+
+    train_file_list = gt_file_train + syn_file_list_filtered
     val_file_list = gt_file_val
 
     n_channel = 3
@@ -209,7 +238,11 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
     img_preprocess = lambda x : normalize(x,1,99.8,axis=axis_norm)
-    label_preprocess = lambda x : fill_label_holes(sem_to_inst_map(x))
+
+    if use_inst_mask:
+        label_preprocess = lambda x : fill_label_holes(x)
+    else:
+        label_preprocess = lambda x : fill_label_holes(sem2inst(x))
 
     '''
     train_set = MoNuSegDataset(
@@ -257,11 +290,15 @@ if __name__ == "__main__":
     print('- validation:     %3d' % len(X_val))
     '''
 
-    X_trn = list(map(lambda x: img_preprocess(read_img(x[0], 'RGB')), train_file_list))
-    Y_trn = list(map(lambda x: label_preprocess(read_img(x[1], 'L')), train_file_list))
+    x_id = 0
+    y_id = 2 if use_inst_mask else 1
+    mask_dtype = 'I' if use_inst_mask else 'L'
 
-    X_val = list(map(lambda x: img_preprocess(read_img(x[0], 'RGB')), val_file_list))
-    Y_val = list(map(lambda x: label_preprocess(read_img(x[1], 'L')), val_file_list))
+    X_trn = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), train_file_list))
+    Y_trn = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), train_file_list))
+
+    X_val = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), val_file_list))
+    Y_val = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), val_file_list))
 
     print('- training:       %3d' % len(X_trn))
     print('- validation:     %3d' % len(X_val))
@@ -294,36 +331,44 @@ if __name__ == "__main__":
         # alternatively, try this:
         # limit_gpu_memory(None, allow_growth=True)
 
-    model = StarDist2D(conf, name='stardist_gt', basedir='/mnt/dataset/stardist/models_monuseg')
+    model = StarDist2D(conf, name=out_name, basedir='/mnt/dataset/stardist/models_monuseg')
 
-    '''
-    median_size = calculate_extents(list(Y), np.median)
+    median_size = calculate_extents(list(Y_trn), np.median)
     fov = np.array(model._axes_tile_overlap('YX'))
     print(f"median object size:      {median_size}")
     print(f"network field of view :  {fov}")
     if any(median_size > fov):
         print("WARNING: median object size larger than field of view of the neural network.")
 
-    model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter)
-        
+    '''
+    model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter)        
     '''
 
-    model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=2000)
+    model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=train_epochs)
 
 
-    test_dirs = {
-        "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
-    }
+    # test_dirs = {
+    #     "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
+    # }
 
-    test_file_list, _ = get_file_label(test_dirs, gt=True)
+    # test_file_list, _ = get_file_label(test_dirs, gt=True)
 
-    X_test = list(map(lambda x: img_preprocess(read_img(x[0], 'RGB')), test_file_list))
-    Y_test = list(map(lambda x: label_preprocess(read_img(x[1], 'L')), test_file_list))
+    # X_test = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), test_file_list))
+    # Y_test = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), test_file_list))
 
-    Y_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm(X_test)]
+    # Y_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
+    #           for x in tqdm(X_test)]
 
-    taus = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    stats = [matching_dataset(Y_test, Y_pred, thresh=t, show_progress=False) for t in tqdm(taus)]
+    # taus = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    # stats = [matching_dataset(Y_test, Y_pred, thresh=t, show_progress=False) for t in tqdm(taus)]
 
-    print(stats[taus.index(0.5)])
+    # print(stats[taus.index(0.5)])
+
+
+if __name__ == "__main__":
+
+    out_name = 'stardist_10gt_inst'
+    filters = []
+
+    main(out_name, filters)
+
