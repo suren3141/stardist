@@ -74,9 +74,9 @@ lbl_cmap = random_label_cmap()
 from stardist.matching import matching
 
 from PIL import Image
-def read_img(filename, mode='RGB'):
+def read_img(filename, mode='RGB', size=(256, 256)):
     img = Image.open(filename)
-    img_rgb = img.convert(mode)
+    img_rgb = img.convert(mode).resize(size)
     img_array = np.array(img_rgb)
     return img_array
 
@@ -177,7 +177,7 @@ def main(out_name, filters):
     gt_dirs = {
         # "all": ["/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData"],
         # "train": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTrainingData"],
-        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/10ss/MoNuSegTrainingData"],
+        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/25ss/MoNuSegTrainingData"],
         # "test": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTestData"],
         # "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
     }
@@ -200,7 +200,7 @@ def main(out_name, filters):
 
 
     # syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
-    # syn_pardir = "/mnt/cvai_s3/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
+    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/25ss"
     syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, "*")))
 
     def get_syn_name(x):
@@ -216,7 +216,7 @@ def main(out_name, filters):
 
     syn_file_list = []
     for f in filters:
-        s, _ = get_file_label(syn_dirs, img_path=None, inst_path=None, filt=f)
+        s, _ = get_file_label(syn_dirs, img_path='images_in_silico_inst', inst_path='masks_in_silico_inst', filt=f)
         syn_file_list.extend(s)
 
     syn_file_list_filtered = []
@@ -322,12 +322,14 @@ def main(out_name, filters):
     print(conf)
     vars(conf)
 
-    free_mem = get_total_mem()
+    allocated_mem = min(1e10, get_total_mem())
+    print("Allocated memory:", allocated_mem)
+
 
     if use_gpu:
         from csbdeep.utils.tf import limit_gpu_memory
         # adjust as necessary: limit GPU memory to be used by TensorFlow to leave some to OpenCL-based computations
-        limit_gpu_memory(0.8, total_memory=free_mem)
+        limit_gpu_memory(0.8, total_memory=allocated_mem)
         # alternatively, try this:
         # limit_gpu_memory(None, allow_growth=True)
 
@@ -367,8 +369,8 @@ def main(out_name, filters):
 
 if __name__ == "__main__":
 
-    out_name = 'stardist_10gt_inst'
-    filters = []
+    out_name = 'stardist_25gt_25syn.x5_inst'
+    filters = [f'*_{i}' for i in range(5)]
 
     main(out_name, filters)
 
