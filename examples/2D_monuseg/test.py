@@ -15,7 +15,8 @@ import glob, os, sys
 sys.path.append('/workspace/stardist')
 sys.path.append('/workspace/hover_net')
 
-from hover_net.compute_stats import get_dice_1
+from hover_net.metrics.stats_utils import get_dice_1
+from metrics import evaluate_instance_f1
 
 import json
 
@@ -36,15 +37,19 @@ def test_single_model(basedir, out_name, X_test, Y_test):
     Y_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_test)]
     
-    dice = get_dice_1(Y_test, Y_pred)
+    dice = np.mean([get_dice_1(y, y_) for y, y_ in zip(Y_test, Y_pred)])
 
     taus = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     stats = [matching_dataset(Y_test, Y_pred, thresh=t, show_progress=False) for t in tqdm(taus)]
+
+    instance_f1 = evaluate_instance_f1(Y_pred, Y_test)
 
     out = {}
     out['dice'] = dice
     for t, x in zip(taus, stats):
         out[t] = x._asdict()
+
+    out[f'inst_f1'] = instance_f1
 
     out_path = os.path.join(basedir, out_name, 'stats.json')
 
@@ -109,7 +114,7 @@ def main_test(models):
 
 if __name__ == "__main__":
 
-    models = ['stardist_25gt_25syn.x5_inst', 'stardist_25gt_25syn_inst', 'stardist_25gt_25syn.x2_inst', 'stardist_25gt_25syn.x3_inst', 'stardist_25gt_25syn.x4_inst', 'stardist_25gt_25syn.x5_inst']
+    models = ['stardist_25gt_inst', 'stardist_25gt_25syn_inst', 'stardist_25gt_25syn.x2_inst', 'stardist_25gt_25syn.x3_inst', 'stardist_25gt_25syn.x4_inst', 'stardist_25gt_25syn.x5_inst']
 
     main_test(models)
 

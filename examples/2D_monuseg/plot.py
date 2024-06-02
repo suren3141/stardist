@@ -13,7 +13,7 @@ def get_json_data(path, file_name='stats.json'):
     for f in files:
         with open(f, 'r') as fp:
             data = json.load(fp)
-            dice = data['dice']
+            dice = data['0.5']['f1']
             exp = os.path.split(os.path.split(f)[0])[-1]
             dic[exp] = dice
 
@@ -46,6 +46,10 @@ if __name__ == "__main__":
 
     plt.plot(range(len(x_10)), y_10, c=col_10, label="10%")
     plt.plot(range(len(x_25)), y_25, c=col_25, label="25%")
+    plt.legend()
+    plt.xlabel('Number of augmentations')
+    plt.xticks(range(len(x_10)), [f'x{i}' for i in range(len(x_10))])
+    plt.ylabel('F1 score')
 
     os.makedirs('tmp', exist_ok=True)
     plt.savefig("tmp/plot.png", dpi=200)
