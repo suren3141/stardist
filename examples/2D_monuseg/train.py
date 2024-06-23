@@ -106,12 +106,14 @@ def main(out_name, filters):
 
     sem2inst = sem_to_inst_map
 
-    train_epochs = 1000
+    train_epochs = 1500
 
     gt_dirs = {
+        # "train" : ["/mnt/cvai_s3/CVAI/genai/Stardist_data/MoNuSegTrainingData/"]
         # "all": ["/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData"],
         # "train": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTrainingData"],
-        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/25ss/MoNuSegTrainingData"],
+        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/MoNuSegTrainingData"],
+        # "train": ["/mnt/cvai_s3/CVAI/genai/Stardist_data/05ss"],
         # "test": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTestData"],
         # "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
     }
@@ -132,9 +134,8 @@ def main(out_name, filters):
     gt_file_val = [gt_file_list[i] for i in ind_val]
     gt_file_train = [gt_file_list[i] for i in ind_train]
 
-
     # syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
-    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/25ss"
+    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/05ss"
     syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, "*")))
 
     def get_syn_name(x):
@@ -240,12 +241,10 @@ def main(out_name, filters):
     # 32 is a good default choice (see 1_data.ipynb)
     n_rays = 32
 
-    # Use OpenCL-based computations for data generator during training (requires 'gputools')
-    use_gpu = gputools_available()
-    print(use_gpu)
-
     # Predict on subsampled grid for increased efficiency and larger field of view
     grid = (2,2)
+
+    use_gpu = True
 
     conf = Config2D (
         n_rays       = n_rays,
@@ -255,17 +254,6 @@ def main(out_name, filters):
     )
     print(conf)
     vars(conf)
-
-    allocated_mem = min(1e10, get_total_mem())
-    print("Allocated memory:", allocated_mem)
-
-
-    if use_gpu:
-        from csbdeep.utils.tf import limit_gpu_memory
-        # adjust as necessary: limit GPU memory to be used by TensorFlow to leave some to OpenCL-based computations
-        limit_gpu_memory(0.8, total_memory=allocated_mem)
-        # alternatively, try this:
-        # limit_gpu_memory(None, allow_growth=True)
 
     model = StarDist2D(conf, name=out_name, basedir='/mnt/dataset/stardist/models_monuseg')
 
@@ -303,8 +291,28 @@ def main(out_name, filters):
 
 if __name__ == "__main__":
 
-    out_name = 'stardist_25gt_25syn.x5_inst'
-    filters = [f'*_{i}' for i in range(5)]
+    # out_names = ['stardist_05gt_inst', 'stardist_05gt_05syn_inst', 'stardist_05gt_05syn.x2_inst', 'stardist_05gt_05syn.x3_inst', 'stardist_05gt_05syn.x4_inst', 'stardist_05gt_05syn.x5_inst']
+    # filter_arr = [[f'*_{i}' for i in range(0)], [f'*_{i}' for i in range(1)], [f'*_{i}' for i in range(2)], [f'*_{i}' for i in range(3)], [f'*_{i}' for i in range(4)], [f'*_{i}' for i in range(5)]]
+    # out_name = 'stardist_25gt_25syn_inst_filt'
+    # filters = [f'*_{i}' for i in range(1)]
 
-    main(out_name, filters)
+    out_names, filter_arr = ['tmp'], [[]]
+
+    # Use OpenCL-based computations for data generator during training (requires 'gputools')
+    use_gpu = gputools_available()
+    print(use_gpu)
+
+    # Maximum memory to allocated in Mb
+    allocated_mem = min(1e4, get_total_mem())
+    print("Allocated memory:", allocated_mem)
+
+    if use_gpu:
+        from csbdeep.utils.tf import limit_gpu_memory
+        # adjust as necessary: limit GPU memory to be used by TensorFlow to leave some to OpenCL-based computations
+        limit_gpu_memory(0.8, total_memory=allocated_mem, allow_growth=False)
+        # alternatively, try this:
+        # limit_gpu_memory(None, allow_growth=True)
+
+    for ind, (o, f) in enumerate(zip(out_names, filter_arr)):
+        main(o, f)
 
