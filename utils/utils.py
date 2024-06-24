@@ -68,8 +68,21 @@ def get_file_label(gt_dirs, gt=True, img_path=None, ann_path=None, inst_path=Non
 
 from PIL import Image
 
-def read_img(filename, mode='RGB', size=(256, 256)):
+def read_img(filename, mode='RGB', size=None):
     img = Image.open(filename)
-    img_rgb = img.convert(mode).resize(size)
+    img_rgb = img.convert(mode)
+    if size is not None:
+        if isinstance(size, int): size = (size, size)
+        assert img_rgb.size == size
+        img_rgb = img_rgb.resize(size)
     img_array = np.array(img_rgb)
     return img_array
+
+def link(src, dst, remove_existing=False):
+    if not os.path.exists(dst):
+        os.symlink(src, dst)
+    elif remove_existing:
+        os.unlink(dst)
+        os.symlink(src, dst)
+    else:
+        raise ValueError(f"path {dst} already exists")

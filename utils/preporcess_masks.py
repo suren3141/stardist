@@ -13,6 +13,21 @@ from hover_net.misc.embeddings import write_embedding
 
 from tqdm import tqdm
 
+def hstack_pil_image(images):
+    widths, heights = zip(*(i.size for i in images))
+
+    total_width = sum(widths)
+    max_height = max(heights)
+
+    new_im = Image.new('RGB', (total_width, max_height))
+
+    x_offset = 0
+    for im in images:
+        new_im.paste(im, (x_offset,0))
+        x_offset += im.size[0]
+    return new_im
+    
+
 def get_nuclie_feature(img, inst_mask, mode="mean"):
     """Each nuclei will be defined by a feature so it could be clustered and anomalies removed"""
     if mode=="mean":
@@ -38,6 +53,22 @@ def scatter_feature(feat, label, col=None):
     return fig
     
 def plot_overlay(image, mask, col=[0, 255, 0], mark_id=True):
+
+    def get_edges(t):
+        edge = np.zeros_like(t).astype(np.bool8)
+        if edge.ndim == 2: # only h, w
+            edge[:, 1:] = edge[:, 1:] | (t[:, 1:] != t[:, :-1])
+            edge[:, :-1] = edge[:, :-1] | (t[:, 1:] != t[:, :-1])
+            edge[1:, :] = edge[1:, :] | (t[1:, :] != t[:-1, :])
+            edge[:-1, :] = edge[:-1, :] | (t[1:, :] != t[:-1, :])
+        else:
+            raise NotImplementedError
+            edge[:, :, :, 1:] = edge[:, :, :, 1:] | (t[:, :, :, 1:] != t[:, :, :, :-1])
+            edge[:, :, :, :-1] = edge[:, :, :, :-1] | (t[:, :, :, 1:] != t[:, :, :, :-1])
+            edge[:, :, 1:, :] = edge[:, :, 1:, :] | (t[:, :, 1:, :] != t[:, :, :-1, :])
+            edge[:, :, :-1, :] = edge[:, :, :-1, :] | (t[:, :, 1:, :] != t[:, :, :-1, :])
+        return edge
+
     img = np.array(image)
     edge = get_edges(mask)
     ind = np.where(edge)
@@ -57,22 +88,6 @@ def plot_overlay(image, mask, col=[0, 255, 0], mark_id=True):
 
     return pil_img
 
-
-def get_edges(t):
-    edge = np.zeros_like(t).astype(np.bool8)
-    if edge.ndim == 2: # only h, w
-        edge[:, 1:] = edge[:, 1:] | (t[:, 1:] != t[:, :-1])
-        edge[:, :-1] = edge[:, :-1] | (t[:, 1:] != t[:, :-1])
-        edge[1:, :] = edge[1:, :] | (t[1:, :] != t[:-1, :])
-        edge[:-1, :] = edge[:-1, :] | (t[1:, :] != t[:-1, :])
-    else:
-        raise NotImplementedError
-        edge[:, :, :, 1:] = edge[:, :, :, 1:] | (t[:, :, :, 1:] != t[:, :, :, :-1])
-        edge[:, :, :, :-1] = edge[:, :, :, :-1] | (t[:, :, :, 1:] != t[:, :, :, :-1])
-        edge[:, :, 1:, :] = edge[:, :, 1:, :] | (t[:, :, 1:, :] != t[:, :, :-1, :])
-        edge[:, :, :-1, :] = edge[:, :, :-1, :] | (t[:, :, 1:, :] != t[:, :, :-1, :])
-    return edge
-
 def update_mask(inst_path, drop_mask, out_path=None):
     file_name = os.path.split(inst_path)[-1]
 
@@ -90,32 +105,19 @@ def update_mask(inst_path, drop_mask, out_path=None):
     return inst_mask
             
 
-
-
-
-
-if __name__ == "__main__":
+def get_GT_syn_files(gt_dir=None, syn_pardir=None, inst_path='masks_in_silico_inst'):
     use_inst_mask = True
     filters = [f'*_{i}' for i in range(5)]
 
     gt_dirs = {
-        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/25ss/MoNuSegTrainingData"],
+        "train": [gt_dir],
     }
 
     gt_file_list, _ = get_file_label(gt_dirs, gt=True)
 
     print(f"gt_file -> {len(gt_file_list)}")
 
-    rng = np.random.RandomState(42)
-    ind = rng.permutation(len(gt_file_list))
-    n_val = max(1, int(round(0.15 * len(ind))))
-    ind_train, ind_val = ind[:-n_val], ind[-n_val:]
-    gt_file_val = [gt_file_list[i] for i in ind_val]
-    gt_file_train = [gt_file_list[i] for i in ind_train]
-
-
     # syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
-    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/25ss"
     syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, "*")))
 
     def get_syn_name(x):
@@ -131,7 +133,7 @@ if __name__ == "__main__":
 
     syn_file_list = []
     for f in filters:
-        s, _ = get_file_label(syn_dirs, img_path='images_in_silico_inst', inst_path='masks_in_silico_inst', filt=f)
+        s, _ = get_file_label(syn_dirs, img_path='images_in_silico_inst', inst_path=inst_path, filt=f)
         syn_file_list.extend(s)
 
     syn_file_list_filtered = []
@@ -142,8 +144,16 @@ if __name__ == "__main__":
 
     print(f"syn_file -> {len(syn_file_list_filtered)}")
 
-    train_file_list = gt_file_train + syn_file_list_filtered
-    val_file_list = gt_file_val
+    return gt_file_list, syn_file_list_filtered
+
+
+
+def main():
+    use_inst_mask=True
+    gt_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/10ss"
+    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/10ss"
+
+    gt_file_list, syn_file_list_filtered = get_GT_syn_files(gt_pardir, syn_pardir)
 
 
     n_channel = 3
@@ -164,16 +174,17 @@ if __name__ == "__main__":
     y_id = 2 if use_inst_mask else 1
     mask_dtype = 'I' if use_inst_mask else 'L'
 
-    X_gt = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(gt_file_list)))
-    Y_gt = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(gt_file_list)))
+    # X_gt = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(gt_file_list)))
+    # Y_gt = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(gt_file_list)))
 
     X_syn = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(syn_file_list_filtered)))
     Y_syn = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(syn_file_list_filtered)))
 
 
     # vals, features = [], []
+    var_scale = 2
 
-    for i, (x, y) in tqdm(enumerate(zip(X_syn, Y_syn))):
+    for i, (x, y) in tqdm(enumerate(zip(X_syn, Y_syn)), total=len(X_syn)):
         val, feat = get_nuclie_feature(img=x, inst_mask=y, mode="mean")
         # vals += list(val)
         # features += feat
@@ -181,23 +192,52 @@ if __name__ == "__main__":
 
         var_feat = np.var(feat[1:], axis=0)
         dist2_0 = np.square(np.abs(feat - feat[0]))
-        drop_mask = np.all(dist2_0 < var_feat, axis=-1)
+        drop_mask = np.all(dist2_0 < var_feat * var_scale, axis=-1)
 
-        if True:
+        if False:
             img = read_img(syn_file_list_filtered[i][x_id], 'RGB')
             msk = Y_syn[i]
             img_pil = plot_overlay(img, msk)
-            img_pil.save(f'tmp/image_with_edge_{i}.png')
+            img_pil.save(f'tmp/filt2/image_with_edge_{i}.png')
 
             fig = scatter_feature(np.array(feat), val, np.where(drop_mask, 'r', 'b'))
-            fig.savefig(f'tmp/scatter_with_idx_{i}.png')
+            fig.savefig(f'tmp/filt2/scatter_with_idx_{i}.png')
 
-        update_mask(syn_file_list_filtered[i][y_id], drop_mask, out_path=os.path.join(syn_pardir, 'masks_in_silico_inst_filt'))
-
-        write_embedding(f'/tmp/nuclei_feature_{name}', None, feat, list(val))
-
-
+            # write_embedding(f'/tmp/nuclei_feature_{name}', None, feat, list(val))
+    
+        update_mask(syn_file_list_filtered[i][y_id], drop_mask, out_path=os.path.join(syn_pardir, 'masks_in_silico_inst_filt2'))
 
 
+
+def visualize_processed_output():
+    use_inst_mask=True
+    gt_pardir = "/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/25ss/MoNuSegTrainingData"
+    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/25ss"
+
+    gt_file_list, syn_file_list_filtered = get_GT_syn_files(gt_pardir, syn_pardir)
+    gt_file_list, syn_file_list_filtered_updated = get_GT_syn_files(gt_pardir, syn_pardir, inst_path='masks_in_silico_inst_filt')
+
+    x_id = 0
+    y_id = 2 if use_inst_mask else 1
+    mask_dtype = 'I' if use_inst_mask else 'L'
+
+    for i, (syn, syn_new) in enumerate(zip(syn_file_list_filtered, syn_file_list_filtered_updated)):
+        img = read_img(syn[x_id], 'RGB')
+        mask1 = read_img(syn[y_id], mask_dtype)
+        mask2 = read_img(syn_new[y_id], mask_dtype)
+
+        img1 = plot_overlay(img, mask1, mark_id=False)
+        img2 = plot_overlay(img, mask2, mark_id=False)
+        images = hstack_pil_image([img1, img2])
+
+        images.save(f'tmp/masks/mask_update_{i}.png')
+
+
+
+
+
+
+if __name__ == "__main__":
+    main()
 
 

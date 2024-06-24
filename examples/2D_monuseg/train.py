@@ -100,50 +100,70 @@ def sem_to_inst_stardist(sem_map):
     labels, details = model_versatile.predict_instances(sem_map)
     return labels
 
-def main(out_name, filters):
-    subsample = None
-    use_inst_mask = True
-
-    sem2inst = sem_to_inst_map
-
-    train_epochs = 1500
-
-    gt_dirs = {
-        # "train" : ["/mnt/cvai_s3/CVAI/genai/Stardist_data/MoNuSegTrainingData/"]
-        # "all": ["/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData"],
-        # "train": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTrainingData"],
-        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/MoNuSegTrainingData"],
-        # "train": ["/mnt/cvai_s3/CVAI/genai/Stardist_data/05ss"],
-        # "test": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTestData"],
-        # "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
-    }
-
-    gt_file_list, _ = get_file_label(gt_dirs, gt=True)
-
+def subsample():
     if subsample is not None:
         np.random.seed(42)
         ind = np.random.choice(len(gt_file_list), int(len(gt_file_list)*float(subsample)), replace=False)
         gt_file_list = [gt_file_list[i] for i in ind]
 
+def get_train_val(gt_dirs):
+
+    gt_file_list, label = get_file_label(gt_dirs, gt=True)
+
     print(f"gt_file -> {len(gt_file_list)}")
 
-    rng = np.random.RandomState(42)
-    ind = rng.permutation(len(gt_file_list))
-    n_val = max(1, int(round(0.15 * len(ind))))
-    ind_train, ind_val = ind[:-n_val], ind[-n_val:]
-    gt_file_val = [gt_file_list[i] for i in ind_val]
-    gt_file_train = [gt_file_list[i] for i in ind_train]
+    if "val" not in label:
+        rng = np.random.RandomState(42)
+        ind = rng.permutation(len(gt_file_list))
+        n_val = max(1, int(round(0.15 * len(ind))))
+        ind_train, ind_val = ind[:-n_val], ind[-n_val:]
+        gt_file_val = [gt_file_list[i] for i in ind_val]
+        gt_file_train = [gt_file_list[i] for i in ind_train]
+    else:
+        ind_train = [l for l in range(len(label)) if label[l]=="train"]
+        ind_val = [l for l in range(len(label)) if label[l]=="val"]
+        gt_file_train = [gt_file_list[i] for i in ind_train]
+        gt_file_val = [gt_file_list[i] for i in ind_val]    
+
+    print(f"\ttrain_file -> {len(gt_file_train)}")
+    print(f"\tval_file -> {len(gt_file_val)}")
+
+    return gt_file_train, gt_file_val
+
+
+def main(out_name, filters):
+    use_inst_mask = True
+
+    sem2inst = sem_to_inst_map
+    basedir='/mnt/dataset/stardist/models_monuseg_v1.3_Syn2GT'
+    train_epochs = 500
+
+    gt_dirs = {
+        # "train" : ["/mnt/cvai_s3/CVAI/genai/Stardist_data/MoNuSegTrainingData/"]
+        # "all": ["/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData"],
+        # "train": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTrainingData"],
+        "train": ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/05ss/MoNuSegTrainingData/"],
+        # "train": ["/mnt/cvai_s3/CVAI/genai/Stardist_data/05ss"],
+        # "test": ["/mnt/dataset/MoNuSeg/patches_256x256_128x128/ResNet18_kmeans_10_v1.1/4/MoNuSegTestData"],
+        # "val": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
+        "val": ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/MoNuSegTestData/"],
+    }
+
+    gt_file_train, gt_file_val = get_train_val(gt_dirs)
 
     # syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm/monuseg_patches_128.64CH_200st_1e-4lr_8bs_hv_ResNet18_kmeans_10_v1.1_4/ResNet18_kmeans_10_v1.1/*/"
-    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/05ss"
+    # syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/05ss"
+    syn_pardir = "/mnt/cvai_s3/CVAI/genai/Stardist_data/patches_valid_inst_128x128_128x128/05ss"
     syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, "*")))
 
+    '''
     def get_syn_name(x):
         c, x = os.path.split(x)
         c = os.path.split(c)[-1]
         return f"{c}_{x}"
 
     syn_dirs = { get_syn_name(x): x for x in syn_dirs}
+    '''
 
     syn_dirs = {
         "syn" : syn_pardir
@@ -157,12 +177,50 @@ def main(out_name, filters):
     syn_file_list_filtered = []
 
     for f in syn_file_list:
-        valid = any([Path(f[0]).stem.startswith(Path(i[0]).stem) for i in gt_file_list])
+        valid = any([Path(f[0]).stem.startswith(Path(i[0]).stem) for i in gt_file_train])  # TODO : updated this
         if valid : syn_file_list_filtered.append(f)
 
     print(f"syn_file -> {len(syn_file_list_filtered)}")
 
-    train_file_list = gt_file_train + syn_file_list_filtered
+    ## sampling based on F1 vals
+    if False:
+        n_channel = 3
+        axis_norm = (0,1)   # normalize channels independently
+        # axis_norm = (0,1,2) # normalize channels jointly
+        if n_channel > 1:
+            print("Normalizing image channels %s." % ('jointly' if axis_norm is None or 2 in axis_norm else 'independently'))
+            sys.stdout.flush()
+
+        img_preprocess = lambda x : normalize(x,1,99.8,axis=axis_norm)
+
+        if use_inst_mask:
+            label_preprocess = lambda x : fill_label_holes(x)
+        else:
+            label_preprocess = lambda x : fill_label_holes(sem2inst(x))
+
+        x_id = 0
+        y_id = 2 if use_inst_mask else 1
+        mask_dtype = 'I' if use_inst_mask else 'L'
+
+        model = StarDist2D(None, name='stardist_128_128_gt_inst', basedir='/mnt/dataset/stardist/models_monuseg')
+
+        X_syn = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(syn_file_list_filtered)))
+        Y_syn = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(syn_file_list_filtered)))
+        Y_pred_syn = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
+            for x in tqdm(X_syn)]
+
+        stats_syn = [matching(y_t, y_p, thresh=.7, criterion='iou', report_matches=False) for y_t,y_p in zip(Y_syn, Y_pred_syn)]
+        metric_syn = [getattr(stat, 'f1') for stat in stats_syn]
+
+        metric_syn = np.power(metric_syn, 2)
+
+        ind = np.random.choice(range(len(syn_file_list_filtered)), size=int(len(syn_file_list_filtered)*.2), replace=False, p=metric_syn/np.sum(metric_syn))
+        syn_file_list_filtered = [syn_file_list_filtered[i] for i in ind]
+
+        print(f"syn_file (prob filt) -> {len(syn_file_list_filtered)}")
+
+    # train_file_list = gt_file_train + syn_file_list_filtered
+    train_file_list = gt_file_train
     val_file_list = gt_file_val
 
     n_channel = 3
@@ -232,6 +290,9 @@ def main(out_name, filters):
     X_trn = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(train_file_list)))
     Y_trn = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(train_file_list)))
 
+    X_syn = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(syn_file_list_filtered)))
+    Y_syn = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(syn_file_list_filtered)))
+
     X_val = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(val_file_list)))
     Y_val = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(val_file_list)))
 
@@ -251,11 +312,12 @@ def main(out_name, filters):
         grid         = grid,
         use_gpu      = use_gpu,
         n_channel_in = n_channel,
+        train_patch_size = Y_trn[0].shape
     )
     print(conf)
     vars(conf)
 
-    model = StarDist2D(conf, name=out_name, basedir='/mnt/dataset/stardist/models_monuseg')
+    model = StarDist2D(conf, name=out_name, basedir=basedir)
 
     median_size = calculate_extents(list(Y_trn), np.median)
     fov = np.array(model._axes_tile_overlap('YX'))
@@ -267,6 +329,10 @@ def main(out_name, filters):
     '''
     model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter)        
     '''
+
+    model.train(X_syn, Y_syn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=train_epochs)
+
+    model.prepare_for_training()
 
     model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=train_epochs)
 
@@ -291,12 +357,22 @@ def main(out_name, filters):
 
 if __name__ == "__main__":
 
-    # out_names = ['stardist_05gt_inst', 'stardist_05gt_05syn_inst', 'stardist_05gt_05syn.x2_inst', 'stardist_05gt_05syn.x3_inst', 'stardist_05gt_05syn.x4_inst', 'stardist_05gt_05syn.x5_inst']
-    # filter_arr = [[f'*_{i}' for i in range(0)], [f'*_{i}' for i in range(1)], [f'*_{i}' for i in range(2)], [f'*_{i}' for i in range(3)], [f'*_{i}' for i in range(4)], [f'*_{i}' for i in range(5)]]
-    # out_name = 'stardist_25gt_25syn_inst_filt'
-    # filters = [f'*_{i}' for i in range(1)]
+    out_names = ['stardist_128_128_05gt_05syn_inst', 'stardist_128_128_05gt_05syn.x2_inst', 'stardist_128_128_05gt_05syn.x3_inst', 'stardist_128_128_05gt_05syn.x4_inst', 'stardist_128_128_05gt_05syn.x5_inst']
+    filter_arr = [[f'*_{i}' for i in range(1)], [f'*_{i}' for i in range(2)], [f'*_{i}' for i in range(3)], [f'*_{i}' for i in range(4)], [f'*_{i}' for i in range(5)]]
 
-    out_names, filter_arr = ['tmp'], [[]]
+    out_names = ['stardist_128_128_05gt_inst'] + out_names
+    filter_arr = [[f'*_{i}' for i in range(0)]] + filter_arr
+
+    # out_names = ['stardist_128_128_gt_inst']
+    # filter_arr = [[f'*_{i}' for i in range(0)]]
+
+    # out_names = ['stardist_128_128_FT.2']
+    # filter_arr = [[f'*_{i}' for i in range(5)]]
+
+
+
+
+    # out_names, filter_arr = ['tmp'], [[]]
 
     # Use OpenCL-based computations for data generator during training (requires 'gputools')
     use_gpu = gputools_available()
@@ -314,5 +390,7 @@ if __name__ == "__main__":
         # limit_gpu_memory(None, allow_growth=True)
 
     for ind, (o, f) in enumerate(zip(out_names, filter_arr)):
+        print(ind)
+        # if ind in [0, 1] : continue
         main(o, f)
 
