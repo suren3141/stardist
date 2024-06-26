@@ -330,9 +330,9 @@ def main(out_name, filters):
     model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter)        
     '''
 
-    model.train(X_syn, Y_syn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=train_epochs)
+    # model.train(X_syn, Y_syn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=train_epochs)
 
-    model.prepare_for_training()
+    # model.prepare_for_training()
 
     model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=train_epochs)
 
@@ -357,11 +357,14 @@ def main(out_name, filters):
 
 if __name__ == "__main__":
 
-    out_names = ['stardist_128_128_05gt_05syn_inst', 'stardist_128_128_05gt_05syn.x2_inst', 'stardist_128_128_05gt_05syn.x3_inst', 'stardist_128_128_05gt_05syn.x4_inst', 'stardist_128_128_05gt_05syn.x5_inst']
-    filter_arr = [[f'*_{i}' for i in range(1)], [f'*_{i}' for i in range(2)], [f'*_{i}' for i in range(3)], [f'*_{i}' for i in range(4)], [f'*_{i}' for i in range(5)]]
+    out_names = []
+    filter_arr = []
 
-    out_names = ['stardist_128_128_05gt_inst'] + out_names
-    filter_arr = [[f'*_{i}' for i in range(0)]] + filter_arr
+    # out_names += ['stardist_128_128_05gt_inst'] 
+    # filter_arr += [[f'*_{i}' for i in range(0)]] 
+
+    out_names += ['stardist_128_128_05gt_05syn_inst', 'stardist_128_128_05gt_05syn.x2_inst', 'stardist_128_128_05gt_05syn.x3_inst', 'stardist_128_128_05gt_05syn.x4_inst', 'stardist_128_128_05gt_05syn.x5_inst']
+    filter_arr += [[f'*_{i}' for i in range(1)], [f'*_{i}' for i in range(2)], [f'*_{i}' for i in range(3)], [f'*_{i}' for i in range(4)], [f'*_{i}' for i in range(5)]]
 
     # out_names = ['stardist_128_128_gt_inst']
     # filter_arr = [[f'*_{i}' for i in range(0)]]
@@ -379,7 +382,7 @@ if __name__ == "__main__":
     print(use_gpu)
 
     # Maximum memory to allocated in Mb
-    allocated_mem = min(1e4, get_total_mem())
+    allocated_mem = min(8000, get_total_mem())
     print("Allocated memory:", allocated_mem)
 
     if use_gpu:
@@ -391,6 +394,7 @@ if __name__ == "__main__":
 
     for ind, (o, f) in enumerate(zip(out_names, filter_arr)):
         print(ind)
-        # if ind in [0, 1] : continue
+        if ind not in [3] : continue
+        # if ind in [0, 1, 2] : continue
         main(o, f)
 

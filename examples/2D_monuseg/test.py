@@ -122,7 +122,8 @@ def main_test(models):
     X_test = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(test_file_list)))
     Y_test = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(test_file_list)))
 
-    for out_name in models:
+    for ind, out_name in enumerate(models):
+        if ind in [0, 1, 2, 3] : continue
         if os.path.exists(os.path.join(basedir, out_name)):
             test_single_model(basedir, out_name, X_test, Y_test)
         else:
@@ -135,7 +136,7 @@ if __name__ == "__main__":
     print(use_gpu)
 
     # Maximum memory to allocated in Mb
-    allocated_mem = min(1e4, get_total_mem())
+    allocated_mem = min(8000, get_total_mem())
     print("Allocated memory:", allocated_mem)
 
     if use_gpu:
