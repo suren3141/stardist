@@ -40,7 +40,7 @@ def get_file_list(data_dir_list, file_type, img_path="images", ann_path='bin_mas
     # Make sure all file names are the same
     for f in file_list:
         x = [Path(i).stem for i in f if i is not None]
-        assert len(set(x)) == 1 and x[0] != ''
+        assert len(set(x)) == 1 and x[0] != '', f"Issue with folder containing {f}"
 
     return file_list
 

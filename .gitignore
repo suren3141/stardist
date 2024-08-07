@@ -22,3 +22,6 @@ htmlcov/
 config.json
 thresholds.json
 examples/**/data
+examples/2D_monuseg/syn_feat.ipynb
+
+examples/2D_monuseg/tmp/

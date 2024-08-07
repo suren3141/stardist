@@ -87,7 +87,7 @@ def test_single_model(basedir, out_name, X_test, Y_test):
 
 def main_test(models):
 
-    basedir='/mnt/dataset/stardist/models_monuseg_v1.3_Syn2GT'
+    basedir='/mnt/dataset/stardist/col_aug_monuseg_v1.2_SynPlusGT_filt'
     # basedir='/mnt/dataset/stardist/models_monuseg_v1.1'
 
     use_inst_mask = True
@@ -115,6 +115,7 @@ def main_test(models):
 
     test_dirs = {
         "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/MoNuSegTestData"],
+        # "test" : ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/__ResNet50_umap_n_components_3_random_state_42_hdbscan_min_samples_10_min_cluster_size_50_v1.2/6/MoNuSegTestData/"],
     }
 
     test_file_list, _ = get_file_label(test_dirs, gt=True)
@@ -123,7 +124,7 @@ def main_test(models):
     Y_test = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(test_file_list)))
 
     for ind, out_name in enumerate(models):
-        if ind in [0, 1, 2, 3] : continue
+        # if ind in [0, 1, 2, 3] : continue
         if os.path.exists(os.path.join(basedir, out_name)):
             test_single_model(basedir, out_name, X_test, Y_test)
         else:
@@ -136,7 +137,7 @@ if __name__ == "__main__":
     print(use_gpu)
 
     # Maximum memory to allocated in Mb
-    allocated_mem = min(8000, get_total_mem())
+    allocated_mem = min(6000, get_total_mem())
     print("Allocated memory:", allocated_mem)
 
     if use_gpu:
