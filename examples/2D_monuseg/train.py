@@ -103,12 +103,20 @@ def sem_to_inst_stardist(sem_map):
 def subsample(file_list, perc=None, size=None, prob=None):
     if perc is None and size is None: raise ValueError
 
+    if prob is not None:
+        ind = np.array(prob) < np.quantile(prob, 0.9)
+        file_list = file_list[ind]
+
     if perc is not None:
         np.random.seed(42)
-        ind = np.random.choice(len(file_list), int(len(file_list)*float(perc)), replace=False, p=prob)
+        ind = np.random.choice(len(file_list), int(len(file_list)*float(perc)), replace=False)
     if size is not None:
-        np.random.seed(42)
-        ind = np.random.choice(len(file_list), int(size), replace=False, p=prob)
+
+        if prob is not None:
+            ind = np.argsort(-prob)[:int(size)]        
+        else:
+            np.random.seed(42)
+            ind = np.random.choice(len(file_list), int(size), replace=False)
 
     file_list = [file_list[i] for i in ind]
 
@@ -178,17 +186,56 @@ def get_prob_from_json(image_list, json_name, clip_percentile=.5, prefix='./monu
     prob = 1 - score_scaled.flatten()
     return prob/np.sum(prob)
 
+def sample_by_fscore():
+    n_channel = 3
+    axis_norm = (0,1)   # normalize channels independently
+    # axis_norm = (0,1,2) # normalize channels jointly
+    if n_channel > 1:
+        print("Normalizing image channels %s." % ('jointly' if axis_norm is None or 2 in axis_norm else 'independently'))
+        sys.stdout.flush()
 
-def main(out_name, filters=None, mult=None):
+    img_preprocess = lambda x : normalize(x,1,99.8,axis=axis_norm)
+
+    if use_inst_mask:
+        label_preprocess = lambda x : fill_label_holes(x)
+    else:
+        label_preprocess = lambda x : fill_label_holes(sem2inst(x))
+
+    x_id = 0
+    y_id = 2 if use_inst_mask else 1
+    mask_dtype = 'I' if use_inst_mask else 'L'
+
+    model = StarDist2D(None, name='stardist_128_128_gt_inst', basedir='/mnt/dataset/stardist/models_monuseg')
+
+    X_syn = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(syn_file_list_filtered)))
+    Y_syn = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(syn_file_list_filtered)))
+    Y_pred_syn = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
+        for x in tqdm(X_syn)]
+
+    stats_syn = [matching(y_t, y_p, thresh=.7, criterion='iou', report_matches=False) for y_t,y_p in zip(Y_syn, Y_pred_syn)]
+    metric_syn = [getattr(stat, 'f1') for stat in stats_syn]
+
+    metric_syn = np.power(metric_syn, 2)
+
+    ind = np.random.choice(range(len(syn_file_list_filtered)), size=int(len(syn_file_list_filtered)*.2), replace=False, p=metric_syn/np.sum(metric_syn))
+    syn_file_list_filtered = [syn_file_list_filtered[i] for i in ind]
+
+    print(f"syn_file (prob filt) -> {len(syn_file_list_filtered)}")
+
+
+def main(out_name, filters=None, mult=None, subsample_perc=None, optimize_thresh=True, test_at_end=True):
+
+    data_version = "v1.3"
+    model_version = "v1.2a"
 
     use_inst_mask = True
     filter_from_train = True
-    sample_by_score = True
-    score_json = f'/mnt/dataset/patchcore/monuseg_results/IM224_SAM_P01_D1024-1024_PS-9_ST-4_AN-1_S0/evaluated_results/scores_v1.2.json'
+    sample_by_score = False
+    score_json = f'/mnt/dataset/patchcore/monuseg_results/IM224_SAM_P01_D1024-1024_PS-9_ST-4_AN-1_S0/evaluated_results/scores_{data_version}.json'
 
     sem2inst = sem_to_inst_map
     syn_model = 'sdm'
-    basedir=f'/mnt/dataset/stardist/{syn_model}_monuseg_v1.2_SynPlusGT_filt_prob'
+    basedir=f'/mnt/dataset/stardist/{syn_model}_{model_version}_monuseg_{data_version}_SynPlusGT_filt'
     train_epochs = 500
 
     gt_dirs = {
@@ -208,7 +255,8 @@ def main(out_name, filters=None, mult=None):
 
     gt_file_train, gt_file_val = get_train_val(gt_dirs)
 
-    gt_file_train = subsample(gt_file_train, perc=.05)
+    if subsample_perc is not None:
+        gt_file_train = subsample(gt_file_train, perc=subsample_perc)
 
     print(f"\ttrain_file subsampled-> {len(gt_file_train)}")
 
@@ -246,7 +294,7 @@ def main(out_name, filters=None, mult=None):
 
     ## SDM files
     syn_pardir = "/mnt/dataset/MoNuSeg/out_sdm_128x128/patches_valid_128.32CH_1000st_1e-4lr_8bs_hvb_col_cos_clus6"
-    syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, "v1.2_*")))
+    syn_dirs = sorted(glob.glob(os.path.join(syn_pardir, f"{data_version}_*")))
 
     syn_dirs = {os.path.split(k)[-1] : k for k in syn_dirs}
 
@@ -257,28 +305,23 @@ def main(out_name, filters=None, mult=None):
         ## subsample syn files
         syn_file_list, _ = get_file_label(syn_dirs, img_path='images', inst_path='inst_masks')
         if filter_from_train:
-            syn_file_list_filtered = filt_from_train(syn_file_list, gt_file_train, filter_from_train)
-        else:
-            syn_file_list_filtered = syn_file_list
+            syn_file_list = filt_from_train(syn_file_list, gt_file_train, filter_from_train)
 
-        syn_file_list_filtered = subsample(syn_file_list_filtered, size=len(gt_file_train) * int(mult))
+        syn_file_list_filtered = subsample(syn_file_list, size=len(gt_file_train) * int(mult))
 
     elif syn_model == "sdm" and filters is None:
         assert mult is not None, "Both filters and mult can't be None"
         ## subsample syn files
         syn_file_list, _ = get_file_label(syn_dirs, img_path='samples', inst_path='inst_masks')
         if filter_from_train:
-            syn_file_list_filtered = filt_from_train(syn_file_list, gt_file_train, filter_from_train)
-        else:
-            syn_file_list_filtered = syn_file_list
-        print(len(syn_file_list_filtered))
+            syn_file_list = filt_from_train(syn_file_list, gt_file_train, filter_from_train)
 
         if sample_by_score:
-            prob_score = get_prob_from_json(syn_file_list_filtered, score_json)
+            prob_score = get_prob_from_json(syn_file_list, score_json, clip_percentile=None)
         else:
             prob_score = None
 
-        syn_file_list_filtered = subsample(syn_file_list_filtered, size=len(gt_file_train) * int(mult), prob=prob_score)
+        syn_file_list_filtered = subsample(syn_file_list, size=len(gt_file_train) * int(mult), prob=prob_score)
 
     else:
         for f in filters:
@@ -288,46 +331,15 @@ def main(out_name, filters=None, mult=None):
         syn_file_list_filtered = filt_from_train(syn_file_list, gt_file_train, filter_from_train)
 
 
+    print(f"\tsyn_file total -> {len(syn_file_list)}")
 
-    print(f"\tsyn_file -> {len(syn_file_list_filtered)}")
+    print(f"\tsyn_file subsampled -> {len(syn_file_list_filtered)}")
 
 
     ## sampling based on F1 vals
     if False:
-        n_channel = 3
-        axis_norm = (0,1)   # normalize channels independently
-        # axis_norm = (0,1,2) # normalize channels jointly
-        if n_channel > 1:
-            print("Normalizing image channels %s." % ('jointly' if axis_norm is None or 2 in axis_norm else 'independently'))
-            sys.stdout.flush()
-
-        img_preprocess = lambda x : normalize(x,1,99.8,axis=axis_norm)
-
-        if use_inst_mask:
-            label_preprocess = lambda x : fill_label_holes(x)
-        else:
-            label_preprocess = lambda x : fill_label_holes(sem2inst(x))
-
-        x_id = 0
-        y_id = 2 if use_inst_mask else 1
-        mask_dtype = 'I' if use_inst_mask else 'L'
-
-        model = StarDist2D(None, name='stardist_128_128_gt_inst', basedir='/mnt/dataset/stardist/models_monuseg')
-
-        X_syn = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(syn_file_list_filtered)))
-        Y_syn = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(syn_file_list_filtered)))
-        Y_pred_syn = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
-            for x in tqdm(X_syn)]
-
-        stats_syn = [matching(y_t, y_p, thresh=.7, criterion='iou', report_matches=False) for y_t,y_p in zip(Y_syn, Y_pred_syn)]
-        metric_syn = [getattr(stat, 'f1') for stat in stats_syn]
-
-        metric_syn = np.power(metric_syn, 2)
-
-        ind = np.random.choice(range(len(syn_file_list_filtered)), size=int(len(syn_file_list_filtered)*.2), replace=False, p=metric_syn/np.sum(metric_syn))
-        syn_file_list_filtered = [syn_file_list_filtered[i] for i in ind]
-
-        print(f"syn_file (prob filt) -> {len(syn_file_list_filtered)}")
+        # TODO 
+        sample_by_fscore()
 
     train_file_list = gt_file_train + syn_file_list_filtered
     # train_file_list = gt_file_train
@@ -347,52 +359,6 @@ def main(out_name, filters=None, mult=None):
     #     label_preprocess = lambda x : fill_label_holes(x)
     # else:
     #     label_preprocess = lambda x : fill_label_holes(sem2inst(x))
-
-    '''
-    train_set = MoNuSegDataset(
-        train_file_list, file_type=".png", mode="train", with_type=False, preprocess=(img_preprocess, label_preprocess),
-        target_gen=(None, None), input_shape=(256,256), mask_shape=(256,256))
-
-    val_set = MoNuSegDataset(
-        val_file_list, file_type=".png", mode="test", with_type=False, preprocess=(img_preprocess, label_preprocess),
-        target_gen=(None, None), input_shape=(256,256), mask_shape=(256,256))
-
-    train_loader = DataLoader(train_set, num_workers= 8, batch_size= 8, shuffle=True, drop_last=False, )
-    val_loader = DataLoader(val_set, num_workers= 8, batch_size= 8, shuffle=False, drop_last=False, )
-
-    '''
-    
-    '''
-    X_name = sorted(glob('/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData/images/*.png'))
-    Y_name = sorted(glob('/mnt/dataset/MoNuSeg/patches_valid_256x256_128x128/MoNuSegTrainingData/bin_masks/*.png'))
-    print(len(X_name), len(Y_name))
-    assert all(Path(x).name==Path(y).name for x,y in zip(X_name,Y_name))
-
-
-    X = list(map(lambda x: read_img(x, 'RGB'), X_name))
-    Y = list(map(lambda x: read_img(x, 'L'), Y_name))
-    n_channel = 1 if X[0].ndim == 2 else X[0].shape[-1]
-
-    axis_norm = (0,1)   # normalize channels independently
-    # axis_norm = (0,1,2) # normalize channels jointly
-    if n_channel > 1:
-        print("Normalizing image channels %s." % ('jointly' if axis_norm is None or 2 in axis_norm else 'independently'))
-        sys.stdout.flush()
-
-    X = [normalize(x,1,99.8,axis=axis_norm) for x in tqdm(X)]
-    Y = [fill_label_holes(sem_to_inst_map(y)) for y in tqdm(Y)]
-
-    assert len(X) > 1, "not enough training data"
-    rng = np.random.RandomState(42)
-    ind = rng.permutation(len(X))
-    n_val = max(1, int(round(0.15 * len(ind))))
-    ind_train, ind_val = ind[:-n_val], ind[-n_val:]
-    X_val, Y_val = [X[i] for i in ind_val]  , [Y[i] for i in ind_val]
-    X_trn, Y_trn = [X[i] for i in ind_train], [Y[i] for i in ind_train] 
-    print('number of images: %3d' % len(X))
-    print('- training:       %3d' % len(X_trn))
-    print('- validation:     %3d' % len(X_val))
-    '''
 
     x_id = 0
     y_id = 2 if use_inst_mask else 1
@@ -454,7 +420,13 @@ def main(out_name, filters=None, mult=None):
     print("Training with real...")
     model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter, epochs=train_epochs)
 
-    # model.optimize_thresholds(X_val, Y_val)
+    if optimize_thresh:
+        model.optimize_thresholds(X_val, Y_val)
+
+    if test_at_end:
+        from test import test_single_model
+
+        test_single_model(basedir, out_name, X_val, Y_val)
 
     # test_dirs = {
     #     "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_256x256_128x128/MoNuSegTestData"],
@@ -476,21 +448,20 @@ def main(out_name, filters=None, mult=None):
 
 if __name__ == "__main__":
 
+    subsample_perc = 10
+
     out_names = []
     filter_arr = []
     sizes = []
 
-    # out_names += ['stardist_128_128_05gt_inst'] 
-    # filter_arr += [[f'*_{i}' for i in range(0)]] 
-    # sizes += [0]
+    out_names += [f'stardist_128_128_{subsample_perc:02d}gt_inst'] 
+    filter_arr += [[f'*_{i}' for i in range(0)]] 
+    sizes += [0]
 
-    out_names += ['stardist_128_128_05gt_05syn_inst', 'stardist_128_128_05gt_05syn.x2_inst', 'stardist_128_128_05gt_05syn.x3_inst', 'stardist_128_128_05gt_05syn.x4_inst', 'stardist_128_128_05gt_05syn.x5_inst']
+    out_names += [f'stardist_128_128_{subsample_perc:02d}gt_{subsample_perc:02d}syn_inst', f'stardist_128_128_{subsample_perc:02d}gt_{subsample_perc:02d}syn.x2_inst', f'stardist_128_128_{subsample_perc:02d}gt_{subsample_perc:02d}syn.x3_inst', f'stardist_128_128_{subsample_perc:02d}gt_{subsample_perc:02d}syn.x4_inst', f'stardist_128_128_{subsample_perc:02d}gt_{subsample_perc:02d}syn.x5_inst']
     # filter_arr += [[f'*_{i}' for i in range(1)], [f'*_{i}' for i in range(2)], [f'*_{i}' for i in range(3)], [f'*_{i}' for i in range(4)], [f'*_{i}' for i in range(5)]]
     filter_arr += [None] * 5
     sizes += list(range(1, 6))
-
-    # out_names = ['stardist_128_128_gt_inst']
-    # filter_arr = [[f'*_{i}' for i in range(0)]]
 
     # out_names = ['stardist_128_128_FT.2']
     # filter_arr = [[f'*_{i}' for i in range(5)]]
@@ -513,8 +484,8 @@ if __name__ == "__main__":
         # limit_gpu_memory(None, allow_growth=True)
 
     for ind, o in enumerate(out_names):
-        print(ind)
+        print(ind, "->", o)
         # if ind not in [3] : continue
         # if ind in [0, 1, 2] : continue
-        main(o, filters=None, mult=sizes[ind])
+        main(o, filters=None, mult=sizes[ind], subsample_perc=subsample_perc/100)
 

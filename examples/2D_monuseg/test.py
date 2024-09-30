@@ -30,9 +30,9 @@ from PIL import Image
 from train import *
 
 
-def test_single_model(basedir, out_name, X_test, Y_test):
+def test_single_model(basedir, model_name, X_test, Y_test, out_name = None):
 
-    model = StarDist2D(None, name=out_name, basedir=basedir)
+    model = StarDist2D(None, name=model_name, basedir=basedir)
 
     Y_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_test)]
@@ -56,6 +56,9 @@ def test_single_model(basedir, out_name, X_test, Y_test):
 
     # instance_f1 = evaluate_instance_f1(Y_pred, Y_test)
     # out[f'inst_f1'] = instance_f1
+
+    if out_name is None:
+        out_name = model_name
 
     out_path = os.path.join(basedir, out_name)
 
@@ -87,7 +90,8 @@ def test_single_model(basedir, out_name, X_test, Y_test):
 
 def main_test(models):
 
-    basedir='/mnt/dataset/stardist/col_aug_monuseg_v1.2_SynPlusGT_filt'
+    syn_model = 'sdm'
+    basedir=f'/mnt/dataset/stardist/{syn_model}_monuseg_v1.2a_SynPlusGT_filt'
     # basedir='/mnt/dataset/stardist/models_monuseg_v1.1'
 
     use_inst_mask = True
@@ -114,8 +118,8 @@ def main_test(models):
 
 
     test_dirs = {
-        "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/MoNuSegTestData"],
-        # "test" : ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/__ResNet50_umap_n_components_3_random_state_42_hdbscan_min_samples_10_min_cluster_size_50_v1.2/6/MoNuSegTestData/"],
+        # "test": ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/MoNuSegTestData"],
+        "test" : ["/mnt/dataset/MoNuSeg/patches_valid_inst_128x128_128x128/__ResNet50_umap_n_components_3_random_state_42_hdbscan_min_samples_10_min_cluster_size_50_v1.2/6/MoNuSegTestData/"],
     }
 
     test_file_list, _ = get_file_label(test_dirs, gt=True)
@@ -123,12 +127,13 @@ def main_test(models):
     X_test = list(map(lambda x: img_preprocess(read_img(x[x_id], 'RGB')), tqdm(test_file_list)))
     Y_test = list(map(lambda x: label_preprocess(read_img(x[y_id], mask_dtype)), tqdm(test_file_list)))
 
-    for ind, out_name in enumerate(models):
+    for ind, model_name in enumerate(models):
         # if ind in [0, 1, 2, 3] : continue
-        if os.path.exists(os.path.join(basedir, out_name)):
-            test_single_model(basedir, out_name, X_test, Y_test)
+        out_name = os.path.join(model_name, "clus6")
+        if os.path.exists(os.path.join(basedir, model_name)):
+            test_single_model(basedir, model_name, X_test, Y_test)
         else:
-            print(f"dir {os.path.join(basedir, out_name)} does not exist")
+            print(f"dir {os.path.join(basedir, model_name)} does not exist")
 
 if __name__ == "__main__":
 
